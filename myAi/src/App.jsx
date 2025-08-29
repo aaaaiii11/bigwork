@@ -23,7 +23,7 @@ const App= ()=>{
   const {Search}=Input;
   const [state,dispatch]=useReducer(reducer,{ results:[],})
   const { results }= state;
-  const messages=state.results;
+  const messages=[];
 
   const openai = new OpenAI({
     baseURL: 'https://api.deepseek.com',
@@ -31,29 +31,29 @@ const App= ()=>{
     dangerouslyAllowBrowser: true,
   });
   
-  async function main(question) { 
+  async function main(question) {
+    messages.push({"role":'user',"content":question})
     const completion = await openai.chat.completions.create({
-      messages: [{ role: "system", content: question }],
+      messages:messages,
       model: "deepseek-chat",
+      
     });
+    messages.push(completion.choices[0].message);
     return completion.choices[0].message.content;
   }
 
-  const onsearch = async (value, _e, info) => {
+//将用户输入的问题保存起来
+  const onsearch = async (value, _e,info) => {
     dispatch({
       type: 'user',
       value: value
     })
-    if(messages.length!==0){
-      value=messages;
-    }
-    console.log(results);
     info = await main(value);
-    console.log(`用户提的问题是${value}`)
     dispatch({
       type: 'ai',
       value: info
     })
+    console.log(messages)
   }
 
   
