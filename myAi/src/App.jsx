@@ -2,7 +2,7 @@ import { OpenAI } from 'openai';
 import { Bubble } from "@ant-design/x";
 import { UserOutlined } from '@ant-design/icons';
 import { Button, Input, Space,Card} from 'antd';
-import { useState,useEffect,useRef }from 'react';
+import { useState }from 'react';
 import MarkdownIt from 'markdown-it';
 
 const fooAvatar = {
@@ -22,10 +22,8 @@ const renderMarkdown= content=>{
 }
 const App= ()=>{
   const {Search}=Input;
-  const text=useRef(0)
-  const [loading,setLoading]=useState(false);
   const [messages,setMessages]=useState([]);
-  const [time,setTime]=useState(0);
+
   const openai = new OpenAI({
     baseURL: 'https://api.deepseek.com',
     apiKey: 'sk-5aaf786676194a7b8c140b5f7ea00f8a',
@@ -35,32 +33,26 @@ const App= ()=>{
   async function main(question) {
     const newMessages = [...messages,{"role":'user',"content":question}];
     setMessages(newMessages);
+    let resluts='';
 
     const completion = await openai.chat.completions.create({
       messages:newMessages,
       model: "deepseek-chat",
+      stream: true,
     });
-    setMessages([...newMessages,completion.choices[0].message]);
-    text.current=completion.choices[0].message.content;
-    setLoading(loading=>!loading);
+    for await (const part of completion){
+      resluts+=part.choices[0].delta.content;
+      setMessages([...newMessages, {"role": 'assistant', "content": resluts}]);
+    }
+    console.log(messages);
     return completion.choices[0].message.content;
   }
+  
 
-  useEffect(() => {
-    const id = setTimeout(
-      () => {
-        setTime(prev => prev + 1);
-      }
-      , text.current.length * 100 + 2000
-    );
-    return () => {
-      clearTimeout(id);
-    }
-  }, [time])
 
 //将用户输入的问题保存起来
   const onsearch = async (value) => {
-    setLoading(loading=>!loading);
+ 
     await main(value);
   }
 
@@ -70,7 +62,7 @@ const App= ()=>{
         <Space direction="vertical">
           {messages.map(message => {
             if (message.role === 'assistant') {
-              return <Bubble style={{ width: 700 }} placement="start" loading={loading} typing content={message.content} messageRender={renderMarkdown}
+              return <Bubble style={{ width: 700 }} placement="start"  typing content={message.content} messageRender={renderMarkdown}
               avatar={{ icon: <UserOutlined />, style: fooAvatar }}
               />
             } else {
