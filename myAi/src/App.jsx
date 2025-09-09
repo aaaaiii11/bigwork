@@ -1,9 +1,10 @@
 import { OpenAI } from 'openai';
-import { Bubble } from "@ant-design/x";
+import { Bubble,Sender } from "@ant-design/x";
 import { UserOutlined } from '@ant-design/icons';
-import { Button, Input, Space,Card} from 'antd';
+import { Button, Space,Card} from 'antd';
 import { useState }from 'react';
 import MarkdownIt from 'markdown-it';
+
 
 const fooAvatar = {
   color: '#f56a00',
@@ -21,8 +22,9 @@ const renderMarkdown= content=>{
   )
 }
 const App= ()=>{
-  const {Search}=Input;
   const [messages,setMessages]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [state,setState]=useState(false);
 
   const openai = new OpenAI({
     baseURL: 'https://api.deepseek.com',
@@ -39,21 +41,32 @@ const App= ()=>{
       messages:newMessages,
       model: "deepseek-chat",
       stream: true,
+      
     });
-    for await (const part of completion){
-      resluts+=part.choices[0].delta.content;
-      setMessages([...newMessages, {"role": 'assistant', "content": resluts}]);
-    }
-    console.log(messages);
-    return completion.choices[0].message.content;
+      for await (const part of completion){
+        resluts+=part.choices[0].delta.content;
+        setMessages([...newMessages, {"role": 'assistant', "content": resluts}]);
+        if(state){
+          break;
+        }
+      }
+    setState(false);
+    setLoading(false);
+    // return completion.choices[0].message.content;
   }
-  
+  //用户点取消发送  
+  const onCancel = () => {
+  const ac = new AbortController();
+  const { signal } = ac;
+    fetch('https://api.deepseek.com', { signal: signal });
+  };  
 
 
-//将用户输入的问题保存起来
   const onsearch = async (value) => {
- 
+    console.log(value);
+    setLoading(true);
     await main(value);
+
   }
 
   return (
@@ -72,13 +85,12 @@ const App= ()=>{
           })}
         </Space>
       </Card>
-      <Search
-        placeholder="input search loading with enterButton"
-        style={{ width: 200 }}
-        onSearch={onsearch}
-        >
-      </Search>
-
+         <Sender onSubmit={onsearch}
+            autoSize={{ minRows: 2, maxRows: 1 }}
+            loading={loading}
+            onCancel={onCancel}
+         > 
+         </Sender>
     </>
   )
 }
