@@ -1,8 +1,9 @@
 import { OpenAI } from 'openai';
 import { Bubble, Sender } from "@ant-design/x";
+import { DeleteOutlined, EditOutlined, StopOutlined } from '@ant-design/icons';
 import { UserOutlined } from '@ant-design/icons';
-import { Button, Space, Card, Layout, Menu, } from 'antd';
-import { useState } from 'react';
+import { Button, Space, Card, Layout, Menu, Modal, Input, message } from 'antd';
+import { useState, useEffect, useRef, } from 'react';
 import MarkdownIt from 'markdown-it';
 import { Conversations } from '@ant-design/x';
 
@@ -24,14 +25,73 @@ const renderMarkdown = content => {
 }
 const App = () => {
   const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [state, setState] = useState(false);
+  const [loading, setLoading] = useState(false)
+  const [conversation, setConversation] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [senderValue, setSenderValue] = useState('');
+  const renameRef = useRef('');
+  const [myAbortControll,setMyAbortControll] =useState(null);
   const [items, setItems] = useState([
     {
-      key:'1',
+      key: '1',
       label: '新建对话1',
     },
-    ]);
+  ]
+);
+const menuConfig = (e) => ({
+  items: [
+    {
+      label: '重命名',
+      key: 'rename',
+      icon: <EditOutlined />,
+    },
+    {
+      label: '删除',
+      key: 'delete',
+      icon: <DeleteOutlined />,
+      danger: true,
+    },
+  ],
+  onClick: menuInfo => {
+    menuInfo.domEvent.stopPropagation(); //阻止冒泡
+    switch (menuInfo.key) {
+      case 'rename':
+        handleRename(e.key);
+        break;
+        case 'delete':
+          handleDelect(e.key);
+          break;
+        }
+      },
+    });
+    
+    const myStorage = localStorage;
+  
+    const storeItems = JSON.parse(myStorage.getItem('items'));
+    
+    useEffect(() => {
+      if (storeItems) {
+        setItems(storeItems);
+      }
+    }, []);
+  //首次进入页面获取
+  useEffect(() => {
+    const setLastKey = () => {
+      const conversationKey = myStorage.getItem('lastConversation');
+      setConversation(conversationKey);
+    }
+    setLastKey()
+  }, [])
+
+  useEffect(() => {
+    const storeMessages = JSON.parse(myStorage.getItem(`${conversation}`));
+    if (storeMessages) {
+      setMessages(storeMessages);
+    } else {
+      setMessages([]);
+    }
+  }, [conversation]);
+
   const openai = new OpenAI({
     // baseURL: '/moonshot/v1',
     baseURL: 'https://api.deepseek.com',
@@ -40,98 +100,205 @@ const App = () => {
     dangerouslyAllowBrowser: true,
   });
 
-  async function main(question) {
+  async function main(question,signal) {
     const newMessages = [...messages, { "role": 'user', "content": question }];
     setMessages(newMessages);
     let resluts = '';
-
-    const completion = await openai.chat.completions.create({
-      messages: newMessages,
-      // model: "kimi-k2k-0905-preview",
-      model: "deepseek-chat",
-      stream: true,
-
-    });
-    for await (const part of completion) {
-      resluts += part.choices[0].delta.content;
-      setMessages([...newMessages, { "role": 'assistant', "content": resluts }]);
-      if (state) {
-        break;
+    try{
+      const completion = await openai.chat.completions.create({
+        messages: newMessages,
+        // model: "kimi-k2k-0905-preview",
+        model: "deepseek-chat",
+        stream: true,
+        signal,
+      });
+      for await (const part of completion) {
+        resluts += part.choices[0].delta.content;
+        setMessages([...newMessages, { "role": 'assistant', "content": resluts }]);
+        if (part.choices[0].finish_reason == 'stop') {
+          const newm = [...newMessages, { "role": 'assistant', "content": resluts }];
+          myStorage.setItem(`${conversation}`, JSON.stringify([...newm]));
+        }
       }
+    }catch(err){
+      if(err.name === 'AbortError'){
+        console.log('用户中断了输出')
+      }
+    }finally {
+      setLoading(false);   // 不管成功还是中断，都把“转圈”关掉
     }
-    setState(false);
-    setLoading(false);
-    console.log(messages);
-
-    return completion.choices[0].message.content;
+    // return completion.choices[0].message.content;
   }
-  //用户点取消发送  (还未完成)
+  //用户点取消发送 (还未完成)
   const onCancel = () => {
-    const ac = new AbortController();
-    const { signal } = ac;
-    fetch('https://api.deepseek.com', { signal: signal });
+    myAbortControll.abort();
   };
-
-
-  const onsearch = async (value) => {
-    console.log(value);
+  //用户点发送
+  const onsearch = async () => {
+    const ac = new AbortController();
+    setMyAbortControll(ac);
+    console.log(myAbortControll);
     setLoading(true);
-    await main(value);
-  }
+    setSenderValue('');
+    await main(senderValue,myAbortControll);
+    console.log('senderValue', senderValue);
 
+  }
   //点击添加对话
   const handleOnClick = () => {
-    setItems([...items,{key:`${items.length+1}`,label:`新建对话${items.length+1}`}]);
-    console.log(items);
+    // const maxKey = items.length > 0 ? Math.max(...items.map(item => Number(item.key))) : 0;
+    const maxKey = items.reduce((max, item) => Math.max(max, Number(item.key)), 0);
+    const newItems = [{ key: `${maxKey + 1}`, label: `新建对话${maxKey + 1}` }, ...items];
+    setItems(newItems);
+    myStorage.setItem('items', JSON.stringify(newItems));
+  }
+  //点击左侧对话列表
+  const handleClick = (key) => {
+    myStorage.setItem('lastConversation', key);
+    setConversation(key);
+  }
+  //点击左侧的功能框| 重命名
+  const handleRename = (renameKey) => {
+    const myItems = JSON.parse(myStorage.getItem('items'));
+    const renameValue = myItems.find(item => { if (item.key == renameKey) { return item } });
+    const defaultValue = renameValue ? renameValue : '';
+    renameRef.current = defaultValue;
+    setIsModalOpen(true);
+  }
+  //点击左侧的功能框| 删除
+  const handleDelect = (delectKey) => {
+    const newItems = items.filter(item => item.key !== delectKey);
+    setItems(newItems);
+    if (delectKey == conversation) {
+      const myItems = JSON.parse(myStorage.getItem('items'));
+      if (myItems.length > 0) {
+        myStorage.setItem('lastConversation', myItems[0].key);
+        setConversation(myItems[0].key);
+      }
+    }
+    myStorage.setItem('items', JSON.stringify(newItems));
   }
   return (
     <>
-      <Layout>
-        <Sider theme='light' style={{
-          overflow: 'auto',
-          height: '100vh',
-          position: 'sticky',
-          insetInlineStart: 0,
-          top: 0,
-          bottom: 0,
-          scrollbarWidth: 'thin',
-          scrollbarGutter: 'stable',
-        }}>
-          <div className='handleAddBox' style={{padding:'10px 0',textAlign:'center'}}>
-          <Button onClick={handleOnClick} className='handleAdd'>add</Button>
+      <Layout style={{ 
+        paddingBottom: 120
+       }}>
+        <Sider theme='light'
+          style={{
+            overflow: 'auto',
+            height: '100vh',
+            insetInlineStart: 0,
+            top: 0,
+            bottom: 0,
+            scrollbarWidth: 'thin',
+            scrollbarGutter: 'stable',
+            overFlow: 'auto',
+            position: 'fixed',
+            left: 0,
+
+          }}>
+          <div className='handleAddBox' style={{ padding: '10px 0', textAlign: 'center' }}>
+            <Button onClick={handleOnClick} className='handleAdd'>add</Button>
           </div>
-          <Conversations items={items} onClick={(e) => { console.log(e)}}  defaultActiveKey="1"></Conversations>
+          <Conversations items={items} onActiveChange={handleClick} menu={menuConfig} activeKey={conversation || '1'} />
         </Sider>
-        <Layout>
-        <Content>
-          <Space direction="vertical" >
-            {messages.map(message => {
-              if (message.role === 'assistant') {
-                return <Bubble style={{ width: 700 }} placement="start" typing content={message.content} messageRender={renderMarkdown}
-                  avatar={{ icon: <UserOutlined />, style: fooAvatar }}
-                />
-              } else {
-                return <Bubble style={{ width: 850 }} placement="end" content={message.content}
-                  avatar={{ icon: <UserOutlined />, style: barAvatar }} />
-              }
-            })}
-          </Space>
+        <Layout style={{ marginLeft: 200, minHeight: '100vh' }}>
+          <Content>
+            <Space direction="vertical" >
+              {messages.map(message => {
+                if (message.role === 'assistant') {
+                  return <Bubble style={{ width: 700 }} placement="start" content={message.content} messageRender={renderMarkdown}
+                    avatar={{ icon: <UserOutlined />, style: fooAvatar }}
+                  />
+                } else {
+                  return <Bubble style={{ width: 850 }} placement="end" content={message.content}
+                    avatar={{ icon: <UserOutlined />, style: barAvatar }}
+                  />
+                }
+              })}
+            </Space>
           </Content>
 
-          <Footer>
-            <Sender onSubmit={onsearch}
+          <Footer style={{
+            position: 'fixed',
+            bottom: 0,
+            width: 'calc(100% - 200px)',  
+            textAlign: 'center',
+            background: '#f0f2f5',
+            zIndex: 999,
+          }}>
+            <Sender
+              onSubmit={onsearch}
               placeholder="请输入内容"
               loading={loading}
               onCancel={onCancel}
+              onChange={(e) => { setSenderValue(e) }}
+              value={senderValue}
             >
             </Sender>
           </Footer>
         </Layout>
       </Layout>
-
+      <MyModal isModalOpen={isModalOpen} setIsModalOpen={setIsModalOpen} setItems={setItems} rename={renameRef.current.label} renameKey={renameRef.current.key} items={items}></MyModal>
     </>
   )
 }
+//修改名字的组件
+const MyModal = ({ isModalOpen, setIsModalOpen, rename, renameKey, items ,setItems}) => {
+  const [state, setState] = useState('');
+  const [inputState, setInputState] = useState(null);
+  const [messageApi, contextHolder] = message.useMessage();
+  useEffect(() => {
+    if (rename) {
+      setState(rename);
+    }
+  }, [rename])
+  const error = () => {
+    messageApi.open({
+      type: 'error',
+      content: '名字不能为空!',
+    });
+  };
+  const handleOk = () => {
+    if (state == '') {
+      error();  //名字不能为空
+      return
+    } else {
+      const newItems = [...items.map(label => {
+        if (label.key == renameKey) {
+          return { key: renameKey, label: state };
+        }
+        return label;
+      })];
+      setItems(newItems);
+      localStorage.setItem('items', JSON.stringify(newItems));
+      setIsModalOpen(false);
+    }
+  }
 
+  const handleChange = (e) => {
+    setState(e.target.value);
+    if (e.target.value == '') {
+      setInputState('error');
+    } else {
+      setInputState(null);
+    }
+  }
+  const handleCancel = () => {
+    setIsModalOpen(false);
+  }
+  return (
+    <>
+      <Modal
+        title="修改名字"
+        open={isModalOpen}
+        onOk={handleOk}
+        onCancel={handleCancel}>
+        {contextHolder}
+        <Input value={state} onChange={handleChange} status={inputState} />
+      </Modal>
+    </>
+  )
+}
 
 export default App;
