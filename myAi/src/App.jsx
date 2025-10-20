@@ -30,7 +30,8 @@ const App = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [senderValue, setSenderValue] = useState('');
   const renameRef = useRef('');
-  const [myAbortControll,setMyAbortControll] =useState(null);
+  // const [myAbortControll,setMyAbortControll] =useState(null);
+  const myAbortControllRef = useRef(null);
   const [items, setItems] = useState([
     {
       key: '1',
@@ -99,8 +100,10 @@ const menuConfig = (e) => ({
     // apiKey:'sk-rVtbsJ5nTvELPpJgovBLzVjTPfx2ja3g4jKwzJ3gZphjwJ9w',
     dangerouslyAllowBrowser: true,
   });
-
   async function main(question,signal) {
+    console.log('📦 控制器实例', myAbortControllRef.current);
+console.log('📡 即将传进的 signal', myAbortControllRef.current?.signal);
+console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
     const newMessages = [...messages, { "role": 'user', "content": question }];
     setMessages(newMessages);
     let resluts = '';
@@ -111,38 +114,53 @@ const menuConfig = (e) => ({
         model: "deepseek-chat",
         stream: true,
         signal,
-      });
+        
+      }
+    );
       for await (const part of completion) {
         resluts += part.choices[0].delta.content;
         setMessages([...newMessages, { "role": 'assistant', "content": resluts }]);
+        console.log('⏩ 循环检测到 aborted，丢弃后续 chunk');
         if (part.choices[0].finish_reason == 'stop') {
           const newm = [...newMessages, { "role": 'assistant', "content": resluts }];
           myStorage.setItem(`${conversation}`, JSON.stringify([...newm]));
         }
       }
     }catch(err){
+      console.log('错误信息',err);
+      console.log('🔥 catch 触发', err.name, err.message);
       if(err.name === 'AbortError'){
         console.log('用户中断了输出')
       }
     }finally {
       setLoading(false);   // 不管成功还是中断，都把“转圈”关掉
+      
     }
     // return completion.choices[0].message.content;
   }
   //用户点取消发送 (还未完成)
   const onCancel = () => {
-    myAbortControll.abort();
+    console.log('🛑 abort 之后立即查看', myAbortControllRef.current.signal.aborted);
+    if( myAbortControllRef.current ){
+      myAbortControllRef.current.abort();
+      console.log('中断请求已发送',myAbortControllRef.current);
+    }else{
+      console.log('没有可中断的请求');
+    }
   };
-  //用户点发送
-  const onsearch = async () => {
-    const ac = new AbortController();
-    setMyAbortControll(ac);
-    console.log(myAbortControll);
+  // //用户点发送
+  // const onsearch = async () => {
+  //   const ac = new AbortController();
+  //   setMyAbortControll(ac);
+  //   setLoading(true);
+  //   await main(senderValue,ac.signal);
+  //   setSenderValue('');
+  // }
+  const onsearch =async()=>{
+    myAbortControllRef.current = new AbortController();
     setLoading(true);
+    await main(senderValue,myAbortControllRef.current.signal);
     setSenderValue('');
-    await main(senderValue,myAbortControll);
-    console.log('senderValue', senderValue);
-
   }
   //点击添加对话
   const handleOnClick = () => {
@@ -167,15 +185,19 @@ const menuConfig = (e) => ({
   }
   //点击左侧的功能框| 删除
   const handleDelect = (delectKey) => {
+    myStorage.removeItem(`${delectKey}`);
     const newItems = items.filter(item => item.key !== delectKey);
-    setItems(newItems);
-    if (delectKey == conversation) {
-      const myItems = JSON.parse(myStorage.getItem('items'));
-      if (myItems.length > 0) {
-        myStorage.setItem('lastConversation', myItems[0].key);
-        setConversation(myItems[0].key);
+    setItems(()=>{
+      if (delectKey == conversation) {
+        const myItems = JSON.parse(myStorage.getItem('items'));
+        if (myItems.length > 0) {
+          myStorage.setItem('lastConversation', myItems[0].key);
+          setConversation(myItems[0].key);
+        }
       }
-    }
+      return newItems;
+    });
+    
     myStorage.setItem('items', JSON.stringify(newItems));
   }
   return (
@@ -231,6 +253,7 @@ const menuConfig = (e) => ({
               onSubmit={onsearch}
               placeholder="请输入内容"
               loading={loading}
+              // disabled={loading}
               onCancel={onCancel}
               onChange={(e) => { setSenderValue(e) }}
               value={senderValue}
