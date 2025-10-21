@@ -30,7 +30,6 @@ const App = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [senderValue, setSenderValue] = useState('');
   const renameRef = useRef('');
-  // const [myAbortControll,setMyAbortControll] =useState(null);
   const myAbortControllRef = useRef(null);
   const [items, setItems] = useState([
     {
@@ -67,9 +66,7 @@ const menuConfig = (e) => ({
     });
     
     const myStorage = localStorage;
-  
     const storeItems = JSON.parse(myStorage.getItem('items'));
-    
     useEffect(() => {
       if (storeItems) {
         setItems(storeItems);
@@ -101,9 +98,6 @@ const menuConfig = (e) => ({
     dangerouslyAllowBrowser: true,
   });
   async function main(question,signal) {
-    console.log('📦 控制器实例', myAbortControllRef.current);
-console.log('📡 即将传进的 signal', myAbortControllRef.current?.signal);
-console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
     const newMessages = [...messages, { "role": 'user', "content": question }];
     setMessages(newMessages);
     let resluts = '';
@@ -120,7 +114,7 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
       for await (const part of completion) {
         resluts += part.choices[0].delta.content;
         setMessages([...newMessages, { "role": 'assistant', "content": resluts }]);
-        console.log('⏩ 循环检测到 aborted，丢弃后续 chunk');
+      
         if (part.choices[0].finish_reason == 'stop') {
           const newm = [...newMessages, { "role": 'assistant', "content": resluts }];
           myStorage.setItem(`${conversation}`, JSON.stringify([...newm]));
@@ -128,7 +122,6 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
       }
     }catch(err){
       console.log('错误信息',err);
-      console.log('🔥 catch 触发', err.name, err.message);
       if(err.name === 'AbortError'){
         console.log('用户中断了输出')
       }
@@ -140,7 +133,6 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
   }
   //用户点取消发送 (还未完成)
   const onCancel = () => {
-    console.log('🛑 abort 之后立即查看', myAbortControllRef.current.signal.aborted);
     if( myAbortControllRef.current ){
       myAbortControllRef.current.abort();
       console.log('中断请求已发送',myAbortControllRef.current);
@@ -148,14 +140,7 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
       console.log('没有可中断的请求');
     }
   };
-  // //用户点发送
-  // const onsearch = async () => {
-  //   const ac = new AbortController();
-  //   setMyAbortControll(ac);
-  //   setLoading(true);
-  //   await main(senderValue,ac.signal);
-  //   setSenderValue('');
-  // }
+
   const onsearch =async()=>{
     myAbortControllRef.current = new AbortController();
     setLoading(true);
@@ -167,8 +152,10 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
     // const maxKey = items.length > 0 ? Math.max(...items.map(item => Number(item.key))) : 0;
     const maxKey = items.reduce((max, item) => Math.max(max, Number(item.key)), 0);
     const newItems = [{ key: `${maxKey + 1}`, label: `新建对话${maxKey + 1}` }, ...items];
-    setItems(newItems);
-    myStorage.setItem('items', JSON.stringify(newItems));
+    setItems(()=>{
+      myStorage.setItem('items', JSON.stringify(newItems));
+      setConversation(`${newItems[0].key}`)
+      return newItems});
   }
   //点击左侧对话列表
   const handleClick = (key) => {
@@ -217,7 +204,6 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
             overFlow: 'auto',
             position: 'fixed',
             left: 0,
-
           }}>
           <div className='handleAddBox' style={{ padding: '10px 0', textAlign: 'center' }}>
             <Button onClick={handleOnClick} className='handleAdd'>add</Button>
@@ -253,7 +239,6 @@ console.log('📡 signal.aborted', myAbortControllRef.current?.signal.aborted);
               onSubmit={onsearch}
               placeholder="请输入内容"
               loading={loading}
-              // disabled={loading}
               onCancel={onCancel}
               onChange={(e) => { setSenderValue(e) }}
               value={senderValue}
